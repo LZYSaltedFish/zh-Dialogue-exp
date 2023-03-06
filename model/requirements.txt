@@ -1,3 +1,4 @@
 colossalai
 torch==1.12.1
 transformers
+tensorboard
