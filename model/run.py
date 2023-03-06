@@ -1,11 +1,13 @@
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
 import math
+from tqdm import tqdm
+import time
 
 import colossalai
 from colossalai.logging import get_dist_logger
 from colossalai.core import global_context as gpc
-from colossalai.utils import save_checkpoint
+from colossalai.utils import save_checkpoint, load_checkpoint
 
 import torch
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
@@ -28,10 +30,10 @@ huggingface_cache_path = '/apsarapangu/disk3/xianyu-anaconda/huggingface_cache'
 params = {
     'max_seq_len': 512,
     'lr': 7e-6,
-    'batch_size': 1,
     'lr_scheduler_patience': 3,
     'lr_scheduler_decay': 0.5,
-    "save_ckpt_steps": 2000
+    'save_ckpt_steps': 2000,
+    'log_n_steps': 50
 }
 
 class DialogueDataset(Dataset):
@@ -158,6 +160,8 @@ best_valid_score = float('inf')
 tensorboard = SummaryWriter(
     log_dir=os.path.join(ckpt_dir, 'log'))
 
+last_time = time.time()
+
 if __name__ == '__main__':
     # 1.initialize distributed environment
     colossalai.launch_from_torch(config=config_path)
@@ -169,11 +173,11 @@ if __name__ == '__main__':
     valid_dataset = DialogueDataset(data_file=valid_data_path, max_seq_length=params['max_seq_len'])
     train_dataloader = DataLoader(train_dataset,
                                   sampler=RandomSampler(train_dataset),
-                                  batch_size=params['batch_size'],
+                                  batch_size=gpc.config.BATCH_SIZE,
                                   collate_fn=train_dataset.batch_fn)
     valid_dataloader = DataLoader(valid_dataset,
                                   sampler=RandomSampler(valid_dataset),
-                                  batch_size=params['batch_size'],
+                                  batch_size=gpc.config.BATCH_SIZE,
                                   collate_fn=valid_dataset.batch_fn)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
@@ -191,8 +195,10 @@ if __name__ == '__main__':
     
     # 4.Start training
     logger = get_dist_logger()
+    total_epochs = gpc.config.NUM_EPOCHS
+    total_training_steps = int(math.ceil(len(train_dataloader) * total_epochs))
 
-    for epoch in range(gpc.config.NUM_EPOCHS):
+    for epoch in range(total_epochs):
         # execute a training iteration
         engine.train()
         for _step, batch in enumerate(train_dataloader):
@@ -222,17 +228,22 @@ if __name__ == '__main__':
             engine.step()
 
             _global_step += 1
+            cur_lr = optimizer.param_groups[0]['lr']
             log_tensorboard(writer=tensorboard,
-                            learning_rate=optimizer.param_groups[0]['lr'],
+                            learning_rate=cur_lr,
                             current_loss=train_loss,
                             global_step=_global_step)
+            if (_global_step+1) % params['log_n_steps'] == 0:
+                logger.info(f'Epoch [{epoch+1:2}/{total_epochs:2}], step [{_global_step+1}/{total_training_steps}], lr {cur_lr:.6f}, {time.time()-last_time:.2f} s')
+                logger.info(f'loss: {train_loss:.4f}')
+                last_time = time.time()
 
 
 
-            if _global_step % params['save_ckpt_steps'] == 0:
+            if (_global_step+1) % params['save_ckpt_steps'] == 0:
                 # Evaluation
                 logger.info(
-                    f'========== Evaluation at global step {_global_step} =========='
+                    f'========== Evaluation at global step {_global_step+1} =========='
                 )
                 # execute a testing iteration
                 engine.eval()
@@ -241,7 +252,7 @@ if __name__ == '__main__':
                 total_acc = 0
                 total_em = 0
                 total_samples = 0
-                for _valid_step, batch in enumerate(valid_dataloader):
+                for _valid_step, batch in enumerate(tqdm(valid_dataloader)):
                     try:
                         batch = {
                             key: val.cuda() if isinstance(val, torch.Tensor) else val
