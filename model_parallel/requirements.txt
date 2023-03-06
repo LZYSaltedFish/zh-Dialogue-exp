@@ -1,0 +1,5 @@
+colossalai
+torch==1.13.1
+transformers
+tensorboard
+titans
