@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 import math
 from tqdm import tqdm
 import time
@@ -15,17 +15,17 @@ from torch.utils.data import Dataset, DataLoader, RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
 
-hf_model_path = 'IDEA-CCNL/Wenzhong-GPT2-110M'
-# hf_model_path = 'IDEA-CCNL/Wenzhong2.0-GPT2-3.5B-chinese'
+# hf_model_path = 'IDEA-CCNL/Wenzhong-GPT2-110M'
+hf_model_path = 'IDEA-CCNL/Wenzhong2.0-GPT2-3.5B-chinese'
 
-config_path = '/apsarapangu/disk3/xianyu-anaconda/zh-Dialogue-exp/model/config.py'
+config_path = '/mnt/workspace/workgroup/lizhenyu/zh-Dialogue-exp/model/config.py'
 
-train_data_path = '/apsarapangu/disk3/xianyu-anaconda/zh-Dialogue-exp/dataset/plain_chitchat/pretrain_train.tsv'
-valid_data_path = '/apsarapangu/disk3/xianyu-anaconda/zh-Dialogue-exp/dataset/plain_chitchat/pretrain_valid.tsv'
+train_data_path = '/mnt/workspace/workgroup/lizhenyu/blender_data/datasets/pretrain_train.tsv'
+valid_data_path = '/mnt/workspace/workgroup/lizhenyu/blender_data/datasets/pretrain_valid.tsv'
 
-ckpt_dir = '/apsarapangu/disk3/xianyu-anaconda/ckpt/Wenzhong-110M/'
+ckpt_dir = '/mnt/workspace/workgroup/lizhenyu/zh_ckpt/3.5B-fp16/'
 
-huggingface_cache_path = '/apsarapangu/disk3/xianyu-anaconda/huggingface_cache'
+# huggingface_cache_path = '/apsarapangu/disk3/xianyu-anaconda/huggingface_cache'
 
 params = {
     'max_seq_len': 512,
@@ -55,7 +55,7 @@ class DialogueDataset(Dataset):
         return data_rows
 
     def load_tokenizer(self, pad_token='<pad>', bos_token='<bos>', truncation_side='left'):
-        self.tokenizer = GPT2Tokenizer.from_pretrained(hf_model_path, cache_dir=huggingface_cache_path)
+        self.tokenizer = GPT2Tokenizer.from_pretrained(hf_model_path)
         self.tokenizer.add_tokens(pad_token)
         self.tokenizer.add_tokens(bos_token)
         self.tokenizer.pad_token = pad_token
@@ -167,7 +167,7 @@ if __name__ == '__main__':
     colossalai.launch_from_torch(config=config_path)
 
     # 2.Create training components
-    model = GPT2LMHeadModel.from_pretrained(hf_model_path, cache_dir=huggingface_cache_path)
+    model = GPT2LMHeadModel.from_pretrained(hf_model_path)
 
     train_dataset = DialogueDataset(data_file=train_data_path, max_seq_length=params['max_seq_len'])
     valid_dataset = DialogueDataset(data_file=valid_data_path, max_seq_length=params['max_seq_len'])
