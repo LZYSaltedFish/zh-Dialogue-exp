@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1'
 import math
 from tqdm import tqdm
 import time
@@ -11,21 +11,22 @@ from colossalai.utils import save_checkpoint, load_checkpoint
 
 import torch
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
-from torch.utils.data import Dataset, DataLoader, RandomSampler
+from torch.utils.data import Dataset, DataLoader, RandomSampler, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
 
 hf_model_path = 'IDEA-CCNL/Wenzhong-GPT2-110M'
 # hf_model_path = 'IDEA-CCNL/Wenzhong2.0-GPT2-3.5B-chinese'
 
-config_path = '/apsarapangu/disk3/xianyu-anaconda/zh-Dialogue-exp/model/config.py'
+config_path = '/mnt/workspace/workgroup/lizhenyu/zh-Dialogue-exp/model/config.py'
 
-train_data_path = '/apsarapangu/disk3/xianyu-anaconda/zh-Dialogue-exp/dataset/plain_chitchat/pretrain_train.tsv'
-valid_data_path = '/apsarapangu/disk3/xianyu-anaconda/zh-Dialogue-exp/dataset/plain_chitchat/pretrain_valid.tsv'
+train_data_path = '/mnt/workspace/workgroup/lizhenyu/blender_data/datasets/finetune_train.tsv'
+valid_data_path = '/mnt/workspace/workgroup/lizhenyu/blender_data/datasets/finetune_valid.tsv'
 
-ckpt_dir = '/apsarapangu/disk3/xianyu-anaconda/ckpt/Wenzhong-110M/'
+read_ckpt_dir = '/mnt/workspace/workgroup/lizhenyu/zh_ckpt/110M-plain-fp32/colossal_model.pt'
+save_ckpt_dir = '/mnt/workspace/workgroup/lizhenyu/zh_ckpt/110M-bst-fp16/'
 
-huggingface_cache_path = '/apsarapangu/disk3/xianyu-anaconda/huggingface_cache'
+# huggingface_cache_path = '/apsarapangu/disk3/xianyu-anaconda/huggingface_cache'
 
 params = {
     'max_seq_len': 512,
@@ -55,7 +56,7 @@ class DialogueDataset(Dataset):
         return data_rows
 
     def load_tokenizer(self, pad_token='<pad>', bos_token='<bos>', truncation_side='left'):
-        self.tokenizer = GPT2Tokenizer.from_pretrained(hf_model_path, cache_dir=huggingface_cache_path)
+        self.tokenizer = GPT2Tokenizer.from_pretrained(hf_model_path)
         self.tokenizer.add_tokens(pad_token)
         self.tokenizer.add_tokens(bos_token)
         self.tokenizer.pad_token = pad_token
@@ -158,25 +159,28 @@ _global_step = 0
 best_valid_score = float('inf')
 
 tensorboard = SummaryWriter(
-    log_dir=os.path.join(ckpt_dir, 'log'))
+    log_dir=os.path.join(save_ckpt_dir, 'log'))
 
 last_time = time.time()
 
 if __name__ == '__main__':
+    local_rank = int(os.environ["LOCAL_RANK"])
+
     # 1.initialize distributed environment
     colossalai.launch_from_torch(config=config_path)
 
     # 2.Create training components
-    model = GPT2LMHeadModel.from_pretrained(hf_model_path, cache_dir=huggingface_cache_path)
+    model = GPT2LMHeadModel.from_pretrained(hf_model_path)
+    load_checkpoint(read_ckpt_dir, model)
 
     train_dataset = DialogueDataset(data_file=train_data_path, max_seq_length=params['max_seq_len'])
     valid_dataset = DialogueDataset(data_file=valid_data_path, max_seq_length=params['max_seq_len'])
     train_dataloader = DataLoader(train_dataset,
-                                  sampler=RandomSampler(train_dataset),
+                                  sampler=DistributedSampler(train_dataset),
                                   batch_size=gpc.config.BATCH_SIZE,
                                   collate_fn=train_dataset.batch_fn)
     valid_dataloader = DataLoader(valid_dataset,
-                                  sampler=RandomSampler(valid_dataset),
+                                  sampler=DistributedSampler(valid_dataset),
                                   batch_size=gpc.config.BATCH_SIZE,
                                   collate_fn=valid_dataset.batch_fn)
 
@@ -229,10 +233,11 @@ if __name__ == '__main__':
 
             _global_step += 1
             cur_lr = optimizer.param_groups[0]['lr']
-            log_tensorboard(writer=tensorboard,
-                            learning_rate=cur_lr,
-                            current_loss=train_loss,
-                            global_step=_global_step)
+            if local_rank == 0:
+                log_tensorboard(writer=tensorboard,
+                                learning_rate=cur_lr,
+                                current_loss=train_loss,
+                                global_step=_global_step)
             if (_global_step+1) % params['log_n_steps'] == 0:
                 logger.info(f'Epoch [{epoch+1:2}/{total_epochs:2}], step [{_global_step+1}/{total_training_steps}], lr {cur_lr:.6f}, {time.time()-last_time:.2f} s')
                 logger.info(f'loss: {train_loss:.4f}')
@@ -289,21 +294,22 @@ if __name__ == '__main__':
                     f"Epoch {epoch} - train loss: {train_loss:.5}, test loss: {total_loss:.5}, ppl: {total_ppl:.5}, acc: {total_acc:.5}, lr: {optimizer.param_groups[0]['lr']:.5g}", ranks=[0])
                 
                 
+                if local_rank == 0:
                 # Save model
-                if total_loss < best_valid_score:
-                    saving_path = os.path.join(ckpt_dir, 'colossal_model.pt')
-                    logger.info(
-                        f'Saving best model to {saving_path}...'
-                    )
-                    save_checkpoint(saving_path, epoch, model)
-                    best_valid_score = total_loss
-                
-                metrics = [('loss', total_loss), ('ppl', total_ppl), ('acc', total_acc), ('em', total_em)]
-                log_tensorboard(writer=tensorboard,
-                                learning_rate=optimizer.param_groups[0]['lr'],
-                                eval_scores=metrics,
-                                global_step=_global_step,
-                                is_training=False)
+                    if total_loss < best_valid_score:
+                        saving_path = os.path.join(save_ckpt_dir, 'colossal_model.pt')
+                        logger.info(
+                            f'Saving best model to {saving_path}...'
+                        )
+                        save_checkpoint(saving_path, epoch, model)
+                        best_valid_score = total_loss
+                    
+                    metrics = [('loss', total_loss), ('ppl', total_ppl), ('acc', total_acc), ('em', total_em)]
+                    log_tensorboard(writer=tensorboard,
+                                    learning_rate=optimizer.param_groups[0]['lr'],
+                                    eval_scores=metrics,
+                                    global_step=_global_step,
+                                    is_training=False)
                 
                 # update learning rate
                 lr_scheduler.step(total_loss)
