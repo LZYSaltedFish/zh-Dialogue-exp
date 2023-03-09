@@ -1,0 +1,7 @@
+{
+    "megatron": {
+        "checkpoint_tensor_model_parallel_size": 1,
+        "world_size": 1,
+        "tensor_model_parallel_size": 1
+    }
+}
