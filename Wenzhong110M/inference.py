@@ -7,7 +7,11 @@ import torch
 import sys as _sys
 from typing import Optional, Dict, Any, List
 
-ckpt_dir = '/mnt/workspace/workgroup/lizhenyu/zh_ckpt/110M-bst-epoch15-fp16/colossal_model.pt'
+ckpt_dir = {
+    '110M-v1': '/mnt/workspace/workgroup/lizhenyu/zh_ckpt/110M-bs4-epoch3-plain-fp32/colossal_model.pt',
+    '110M-v2': '/mnt/workspace/workgroup/lizhenyu/zh_ckpt/110M-bs8-epoch5-bst-fp32/colossal_model.pt',
+    '110M-v3': '/mnt/workspace/workgroup/lizhenyu/zh_ckpt/110M-bs12-epoch10-bst-fp16/colossal_model.pt'
+}
 config_path = '/mnt/workspace/workgroup/lizhenyu/zh-Dialogue-exp/model/config.py'
 wenzhong_path = 'IDEA-CCNL/Wenzhong-GPT2-110M'
 colossalai.launch_from_torch(config=config_path)
@@ -294,5 +298,5 @@ class Predictor():
         self.history_strings = []
 
 if __name__ == '__main__':
-    predictor = Predictor(ckpt_dir)
+    predictor = Predictor(ckpt_dir['110M-v3'])
     predictor.run()
