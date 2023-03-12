@@ -3,5 +3,7 @@ modelscope
 torch==1.12.1
 tensorboard
 transformers
-deepspeed
+deepspeed==0.7.2
 scikit-learn
+SentencePiece
+jieba
