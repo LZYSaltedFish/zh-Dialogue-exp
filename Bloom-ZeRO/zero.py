@@ -9,9 +9,18 @@ from colossalai.zero import ZeroOptimizer
 from torch.utils.data import Dataset, DataLoader, RandomSampler
 import torch
 from colossalai.amp import AMP_TYPE
+import argparse
+
+parser = argparse.ArgumentParser(description='Test')
+parser.add_argument('--data_path', '-d', help='数据集路径')
+parser.add_argument('--local_rank')
+args = parser.parse_args()
 
 hf_model_path = 'IDEA-CCNL/Wenzhong-GPT2-110M'
-dataset_path = '/mnt/workspace/workgroup/lizhenyu/blender_data/datasets/finetune_train.tsv'
+# dataset_path = '/mnt/workspace/workgroup/lizhenyu/blender_data/datasets/finetune_train.tsv'
+dataset_path = args.data_path
+print('*'*50)
+print(dataset_path)
 
 
 class DialogueDataset(Dataset):
