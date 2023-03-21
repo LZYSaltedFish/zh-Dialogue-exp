@@ -105,9 +105,8 @@ model = GeminiDDP(model,
                   placement_policy=PLACEMENT_POLICY,
                   pin_memory=True)
 LR = 5e-5
-# optimizer = HybridAdam(model.parameters(), lr=LR)
-# optimizer = ZeroOptimizer(optimizer, model, initial_scale=2**14)
-optimizer = GeminiAdamOptimizer(model, lr=1e-3, initial_scale=2**5)
+optimizer = HybridAdam(model.parameters(), lr=LR)
+optimizer = ZeroOptimizer(optimizer, model, initial_scale=2**14)
 train_dataset = DialogueDataset(data_file=dataset_path, max_seq_length=512)
 train_dataloader = DataLoader(train_dataset,
                               sampler=RandomSampler(train_dataset),
